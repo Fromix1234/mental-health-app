@@ -11,8 +11,8 @@
   <img src="https://img.shields.io/badge/Python-3.10%2B-blue?style=flat-square&logo=python&logoColor=white"/>
   <img src="https://img.shields.io/badge/PyTorch-2.0%2B-red?style=flat-square&logo=pytorch&logoColor=white"/>
   <img src="https://img.shields.io/badge/RTX_3070-✅_8GB_VRAM-brightgreen?style=flat-square"/>
-  <img src="https://img.shields.io/badge/Параметры-5.3M-ff69b4?style=flat-square"/>
-  <img src="https://img.shields.io/badge/Датасет-5000_диалогов-success?style=flat-square"/>
+  <img src="https://img.shields.io/badge/Параметры-5.6M-ff69b4?style=flat-square"/>
+  <img src="https://img.shields.io/badge/Датасет-10000_диалогов-success?style=flat-square"/>
   <img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square"/>
 </p>
 
@@ -95,18 +95,26 @@ python generate.py
 
 5000 синтетических диалогов, охватывающих:
 
-- Тревожные расстройства
+- Тревожные расстройства и панические атаки
 - Депрессию и апатию
-- Панические атаки
-- Одиночество
-- Проблемы с самооценкой
-- Выгорание и стресс
-- Горе и утрату
+- ОКР (навязчивые мысли и действия)
+- СДВГ (проблемы с фокусом и организацией)
+- Социальную тревожность
 - ПТСР и травму
-- Отношения
+- Биполярное расстройство
 - Расстройства пищевого поведения
-- Зависимости
+- Зависимости (алкоголь, курение, цифровая)
+- Горе и утрату
+- Проблемы с самооценкой и синдром самозванца
+- Прокрастинацию и перфекционизм
+- Выгорание и стресс
+- Отношения и созависимость
+- Диссоциацию и дереализацию
 - Гнев и эмоциональную регуляцию
+- Семейные проблемы и сепарацию
+- Кризисы (четверть жизни, средний возраст, пенсия)
+- Послеродовую депрессию
+- Самоповреждение и суицидальные мысли (кризисная помощь)
 
 ---
 
@@ -121,7 +129,9 @@ python generate.py
 | Warmup | 200 шагов |
 | Шагов | 5000 |
 | Время | ~16 минут |
-| Val loss | 0.0410 |
+| Val loss | 0.0439 |
+| Датасет | 10,000 диалогов, 75+ сценариев |
+| Словарь | 3,378 BPE токенов |
 
 Современные техники (Gradient clipping, AdamW) для стабильного обучения на ограниченном VRAM.
 

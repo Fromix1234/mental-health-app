@@ -29,7 +29,7 @@ class TrainingConfig:
 
 @dataclass
 class DataConfig:
-    dataset_size: int = 5000
+    dataset_size: int = 10000
     train_split: float = 0.9
     data_file: str = "data/therapy_data.json"
     tokenizer_file: str = "data/tokenizer.json"
