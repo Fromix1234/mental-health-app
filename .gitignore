@@ -22,6 +22,14 @@ data/tokenizer.json
 *.swp
 *.swo
 
+# PyTorch model files
+*.pt
+*.pth
+
+# Virtual environment
+venv/
+.venv/
+
 # OS
 Thumbs.db
 .DS_Store
