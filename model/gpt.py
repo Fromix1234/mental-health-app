@@ -143,7 +143,7 @@ class TinyGPT(nn.Module):
         tok_emb = self.token_embedding(idx)
         x = self.drop(tok_emb)
 
-        if self.config.use_checkpoint and self.training:
+        if self.config.use_checkpoint:
             for block in self.blocks:
                 x = checkpoint(block, x, use_reentrant=False)
         else:

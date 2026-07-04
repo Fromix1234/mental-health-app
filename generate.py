@@ -1,7 +1,8 @@
 import os
 import json
+import pickle
 import torch
-from tokenizers import Tokenizer
+from tokenizers import Tokenizer, decoders
 
 from config import CONFIG, ModelConfig
 from model.gpt import TinyGPT
@@ -10,23 +11,25 @@ from model.gpt import TinyGPT
 def load_model(checkpoint_path="checkpoints/best_model.pt"):
     device = CONFIG.device
 
-    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=True)
-    mcfg_data = ckpt["model_config"]
+    with open(checkpoint_path, "rb") as f:
+        ckpt = pickle.load(f)
+
+    tokenizer = Tokenizer.from_file(CONFIG.data.tokenizer_file)
+    tokenizer.decoder = decoders.ByteLevel()
+    vocab_size = tokenizer.get_vocab_size()
 
     model_cfg = ModelConfig(
-        vocab_size=mcfg_data["vocab_size"],
-        n_embd=mcfg_data["n_embd"],
-        n_head=mcfg_data["n_head"],
-        n_layer=mcfg_data["n_layer"],
-        block_size=mcfg_data["block_size"],
+        vocab_size=vocab_size,
+        n_embd=768,
+        n_head=12,
+        n_layer=14,
+        block_size=192,
     )
 
     model = TinyGPT(model_cfg)
     model.load_state_dict(ckpt["model_state_dict"])
     model.to(device)
     model.eval()
-
-    tokenizer = Tokenizer.from_file(CONFIG.data.tokenizer_file)
 
     return model, tokenizer, device
 
@@ -52,8 +55,6 @@ def generate_response(model, tokenizer, device, user_message, max_tokens=100, te
 
     if "Терапевт:" in response:
         response = response.split("Терапевт:", 1)[1].strip()
-    if "[/INST]" in response:
-        response = response.split("[/INST]", 1)[0].strip()
 
     return response
 
