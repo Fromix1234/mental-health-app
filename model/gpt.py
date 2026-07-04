@@ -57,8 +57,9 @@ class CausalSelfAttention(nn.Module):
         v = v.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
 
         if self.cos is not None and self.sin is not None:
-            q = apply_rope(q, self.cos, self.sin)
-            k = apply_rope(k, self.cos, self.sin)
+            cos, sin = self.cos.to(x.device), self.sin.to(x.device)
+            q = apply_rope(q, cos, sin)
+            k = apply_rope(k, cos, sin)
 
         y = F.scaled_dot_product_attention(
             q, k, v,
@@ -167,11 +168,15 @@ class TinyGPT(nn.Module):
         optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=betas, fused=(device_type == "cuda"))
         return optimizer
 
-    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None):
+    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, repetition_penalty=1.1):
         for _ in range(max_new_tokens):
             idx_cond = idx[:, -self.config.block_size:]
             logits, _ = self(idx_cond)
             logits = logits[:, -1, :] / temperature
+
+            if repetition_penalty != 1.0 and idx.size(1) > 1:
+                for token_id in set(idx[0, :-2].tolist()):
+                    logits[:, token_id] /= repetition_penalty
 
             if top_k is not None:
                 v, _ = torch.topk(logits, min(top_k, logits.size(-1)))

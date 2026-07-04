@@ -43,7 +43,8 @@ def generate_response(model, tokenizer, device, user_message, max_tokens=100, te
             input_ids,
             max_new_tokens=max_tokens,
             temperature=temperature,
-            top_k=40,
+            top_k=50,
+            repetition_penalty=1.2,
         )
 
     output_ids = output_ids[0].tolist()

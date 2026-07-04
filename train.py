@@ -13,13 +13,8 @@ class TherapyDataset(Dataset):
     def __init__(self, data, tokenizer, block_size):
         self.tokenizer = tokenizer
         self.block_size = block_size
+        self.pad_id = tokenizer.token_to_id("[PAD]")
         self.encoded = []
-
-        tokenizer.enable_padding(
-            pad_id=tokenizer.token_to_id("[PAD]"),
-            pad_token="[PAD]",
-            length=block_size + 1,
-        )
 
         for item in data:
             ids = tokenizer.encode(item["text"]).ids
@@ -35,8 +30,11 @@ class TherapyDataset(Dataset):
 
     def __getitem__(self, idx):
         tokens = self.encoded[idx]
-        x = torch.tensor(tokens[:-1], dtype=torch.long)
-        y = torch.tensor(tokens[1:], dtype=torch.long)
+        x = torch.full((self.block_size,), self.pad_id, dtype=torch.long)
+        y = torch.full((self.block_size,), -1, dtype=torch.long)
+        seq_len = min(len(tokens) - 1, self.block_size)
+        x[:seq_len] = torch.tensor(tokens[:-1][:seq_len], dtype=torch.long)
+        y[:seq_len] = torch.tensor(tokens[1:][:seq_len], dtype=torch.long)
         return x, y
 
 
@@ -63,6 +61,9 @@ def get_lr(it, cfg):
 
 
 def main():
+    import sys
+    resume = "--resume" in sys.argv
+
     cfg = CONFIG
     os.makedirs(cfg.output_dir, exist_ok=True)
 
@@ -119,6 +120,19 @@ def main():
     step = 0
     tokens_processed = 0
     total_start_time = time.time()
+
+    if resume:
+        ckpt_path = os.path.join(cfg.output_dir, "best_model.pt")
+        if os.path.exists(ckpt_path):
+            ckpt = torch.load(ckpt_path, map_location=cfg.device, weights_only=True)
+            model.load_state_dict(ckpt["model_state_dict"])
+            optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+            step = ckpt["step"] + 1
+            best_val_loss = ckpt.get("val_loss", float("inf"))
+            total_start_time = time.time()
+            print(f"Resumed from step {step} (best val_loss: {best_val_loss:.4f})")
+        else:
+            print(f"No checkpoint found at {ckpt_path}, starting from scratch")
 
     for epoch in range(100):
         if step >= cfg.training.max_steps:

@@ -5,17 +5,17 @@ import torch
 @dataclass
 class ModelConfig:
     vocab_size: int = 8192
-    n_embd: int = 256
-    n_head: int = 8
-    n_layer: int = 6
+    n_embd: int = 768
+    n_head: int = 12
+    n_layer: int = 14
     block_size: int = 192
     dropout: float = 0.1
 
 
 @dataclass
 class TrainingConfig:
-    batch_size: int = 4
-    grad_accum_steps: int = 4
+    batch_size: int = 2
+    grad_accum_steps: int = 8
     learning_rate: float = 3e-4
     weight_decay: float = 0.1
     beta1: float = 0.9
@@ -29,7 +29,7 @@ class TrainingConfig:
 
 @dataclass
 class DataConfig:
-    dataset_size: int = 10000
+    dataset_size: int = 50000
     train_split: float = 0.9
     data_file: str = "data/therapy_data.json"
     tokenizer_file: str = "data/tokenizer.json"
