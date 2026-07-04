@@ -10,6 +10,7 @@ class ModelConfig:
     n_layer: int = 14
     block_size: int = 192
     dropout: float = 0.1
+    use_checkpoint: bool = True
 
 
 @dataclass

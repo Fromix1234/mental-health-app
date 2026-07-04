@@ -1,10 +1,18 @@
 import os
 import math
 import time
+import pickle
+import tempfile
+tempfile.tempdir = r"M:\temp"
 import torch
 from torch.utils.data import Dataset, DataLoader
 
 from config import CONFIG, ModelConfig
+
+
+def save_checkpoint(obj, path):
+    with open(path, "wb") as f:
+        pickle.dump(obj, f)
 from model.gpt import TinyGPT
 from data.dataset import load_or_create_dataset
 
@@ -98,6 +106,7 @@ def main():
         n_layer=cfg.model.n_layer,
         block_size=cfg.model.block_size,
         dropout=cfg.model.dropout,
+        use_checkpoint=cfg.model.use_checkpoint,
     )
 
     model = TinyGPT(model_cfg)
@@ -124,9 +133,8 @@ def main():
     if resume:
         ckpt_path = os.path.join(cfg.output_dir, "best_model.pt")
         if os.path.exists(ckpt_path):
-            ckpt = torch.load(ckpt_path, map_location=cfg.device, weights_only=True)
+            ckpt = pickle.load(open(ckpt_path, "rb"))
             model.load_state_dict(ckpt["model_state_dict"])
-            optimizer.load_state_dict(ckpt["optimizer_state_dict"])
             step = ckpt["step"] + 1
             best_val_loss = ckpt.get("val_loss", float("inf"))
             total_start_time = time.time()
@@ -166,6 +174,7 @@ def main():
                 print(msg)
 
             if step % cfg.training.eval_interval == 0:
+                torch.cuda.empty_cache()
                 val_loss = estimate_loss(model, val_loader, cfg.device)
                 msg = f"step {step:5d} | val_loss {val_loss:.4f}"
                 with open(cfg.log_file, "a", encoding="utf-8") as f:
@@ -174,60 +183,36 @@ def main():
 
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
-                    torch.save(
+                    final_path = os.path.join(cfg.output_dir, "best_model.pt")
+                    save_checkpoint(
                         {
                             "step": step,
                             "model_state_dict": model.state_dict(),
-                            "optimizer_state_dict": optimizer.state_dict(),
-                            "loss": loss.item(),
-                            "model_config": {
-                                "vocab_size": model_cfg.vocab_size,
-                                "n_embd": model_cfg.n_embd,
-                                "n_head": model_cfg.n_head,
-                                "n_layer": model_cfg.n_layer,
-                                "block_size": model_cfg.block_size,
-                            },
                             "val_loss": val_loss,
                         },
-                        os.path.join(cfg.output_dir, "best_model.pt"),
+                        final_path,
                     )
                     print(f"  -> Saved best model (val_loss: {val_loss:.4f})")
 
             if step % cfg.training.save_interval == 0 and step > 0:
-                torch.save(
+                final_path = os.path.join(cfg.output_dir, f"checkpoint_{step}.pt")
+                save_checkpoint(
                     {
                         "step": step,
                         "model_state_dict": model.state_dict(),
-                        "optimizer_state_dict": optimizer.state_dict(),
-                        "loss": loss.item(),
-                        "model_config": {
-                            "vocab_size": model_cfg.vocab_size,
-                            "n_embd": model_cfg.n_embd,
-                            "n_head": model_cfg.n_head,
-                            "n_layer": model_cfg.n_layer,
-                            "block_size": model_cfg.block_size,
-                        },
                     },
-                    os.path.join(cfg.output_dir, f"checkpoint_{step}.pt"),
+                    final_path,
                 )
 
             step += 1
 
-    torch.save(
+    final_path = os.path.join(cfg.output_dir, "final_model.pt")
+    save_checkpoint(
         {
             "step": step,
             "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "loss": loss.item(),
-            "model_config": {
-                "vocab_size": model_cfg.vocab_size,
-                "n_embd": model_cfg.n_embd,
-                "n_head": model_cfg.n_head,
-                "n_layer": model_cfg.n_layer,
-                "block_size": model_cfg.block_size,
-            },
         },
-        os.path.join(cfg.output_dir, "final_model.pt"),
+        final_path,
     )
 
     total_time = time.time() - total_start_time

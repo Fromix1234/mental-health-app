@@ -2,6 +2,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint
 from config import ModelConfig
 
 
@@ -45,8 +46,8 @@ class CausalSelfAttention(nn.Module):
         self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=False)
         self.attn_dropout = config.dropout
         self.resid_dropout = nn.Dropout(config.dropout)
-        self.cos = cos
-        self.sin = sin
+        self.register_buffer("cos", cos)
+        self.register_buffer("sin", sin)
 
     def forward(self, x):
         B, T, C = x.shape
@@ -142,8 +143,12 @@ class TinyGPT(nn.Module):
         tok_emb = self.token_embedding(idx)
         x = self.drop(tok_emb)
 
-        for block in self.blocks:
-            x = block(x)
+        if self.config.use_checkpoint and self.training:
+            for block in self.blocks:
+                x = checkpoint(block, x, use_reentrant=False)
+        else:
+            for block in self.blocks:
+                x = block(x)
 
         x = self.ln_f(x)
         logits = self.lm_head(x)
