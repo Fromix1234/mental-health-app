@@ -4,11 +4,11 @@ import torch
 
 @dataclass
 class ModelConfig:
-    vocab_size: int = 8192
-    n_embd: int = 768
-    n_head: int = 12
-    n_layer: int = 14
-    block_size: int = 192
+    vocab_size: int = 10000
+    n_embd: int = 384
+    n_head: int = 8
+    n_layer: int = 8
+    block_size: int = 256
     dropout: float = 0.1
     use_checkpoint: bool = True
 

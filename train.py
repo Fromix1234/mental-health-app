@@ -1,20 +1,16 @@
 import os
 import math
 import time
-import pickle
-import tempfile
-tempfile.tempdir = r"M:\temp"
 import torch
 from torch.utils.data import Dataset, DataLoader
 
 from config import CONFIG, ModelConfig
+from model.gpt import TinyGPT
+from data.dataset import load_or_create_dataset
 
 
 def save_checkpoint(obj, path):
-    with open(path, "wb") as f:
-        pickle.dump(obj, f)
-from model.gpt import TinyGPT
-from data.dataset import load_or_create_dataset
+    torch.save(obj, path)
 
 
 class TherapyDataset(Dataset):
@@ -88,14 +84,16 @@ def main():
         train_dataset,
         batch_size=cfg.training.batch_size,
         shuffle=True,
-        num_workers=0,
+        num_workers=8,
+        pin_memory=True,
         drop_last=True,
     )
     val_loader = DataLoader(
         val_dataset,
         batch_size=cfg.training.batch_size,
         shuffle=False,
-        num_workers=0,
+        num_workers=8,
+        pin_memory=True,
         drop_last=True,
     )
 
@@ -130,6 +128,9 @@ def main():
     tokens_processed = 0
     total_start_time = time.time()
 
+    use_amp = cfg.device == "cuda"
+    scaler = torch.cuda.amp.GradScaler() if use_amp else None
+
     if resume:
         ckpt_path = os.path.join(cfg.output_dir, "best_model.pt")
         if os.path.exists(ckpt_path):
@@ -137,6 +138,8 @@ def main():
             model.load_state_dict(ckpt["model_state_dict"])
             step = ckpt["step"] + 1
             best_val_loss = ckpt.get("val_loss", float("inf"))
+            if use_amp and "scaler_state_dict" in ckpt:
+                scaler.load_state_dict(ckpt["scaler_state_dict"])
             total_start_time = time.time()
             print(f"Resumed from step {step} (best val_loss: {best_val_loss:.4f})")
         else:
@@ -154,15 +157,25 @@ def main():
                 param_group["lr"] = lr
 
             x, y = x.to(cfg.device), y.to(cfg.device)
-            _, loss = model(x, y)
+
+            with torch.amp.autocast(device_type=cfg.device, enabled=use_amp):
+                _, loss = model(x, y)
             loss = loss / cfg.training.grad_accum_steps
-            loss.backward()
+
+            if use_amp:
+                scaler.scale(loss).backward()
+            else:
+                loss.backward()
 
             tokens_processed += x.numel()
 
             if (step + 1) % cfg.training.grad_accum_steps == 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                optimizer.step()
+                if use_amp:
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    optimizer.step()
                 optimizer.zero_grad()
 
             if step % cfg.training.log_interval == 0:
@@ -183,37 +196,60 @@ def main():
 
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
-                    final_path = os.path.join(cfg.output_dir, "best_model.pt")
-                    save_checkpoint(
-                        {
-                            "step": step,
-                            "model_state_dict": model.state_dict(),
-                            "val_loss": val_loss,
+                    save_dict = {
+                        "step": step,
+                        "model_state_dict": model.state_dict(),
+                        "optimizer_state_dict": optimizer.state_dict(),
+                        "loss": loss.item(),
+                        "model_config": {
+                            "vocab_size": model_cfg.vocab_size,
+                            "n_embd": model_cfg.n_embd,
+                            "n_head": model_cfg.n_head,
+                            "n_layer": model_cfg.n_layer,
+                            "block_size": model_cfg.block_size,
                         },
-                        final_path,
-                    )
+                        "val_loss": val_loss,
+                    }
+                    if use_amp:
+                        save_dict["scaler_state_dict"] = scaler.state_dict()
+                    save_checkpoint(save_dict, os.path.join(cfg.output_dir, "best_model.pt"))
                     print(f"  -> Saved best model (val_loss: {val_loss:.4f})")
 
             if step % cfg.training.save_interval == 0 and step > 0:
-                final_path = os.path.join(cfg.output_dir, f"checkpoint_{step}.pt")
-                save_checkpoint(
-                    {
-                        "step": step,
-                        "model_state_dict": model.state_dict(),
+                save_dict = {
+                    "step": step,
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "loss": loss.item(),
+                    "model_config": {
+                        "vocab_size": model_cfg.vocab_size,
+                        "n_embd": model_cfg.n_embd,
+                        "n_head": model_cfg.n_head,
+                        "n_layer": model_cfg.n_layer,
+                        "block_size": model_cfg.block_size,
                     },
-                    final_path,
-                )
+                }
+                if use_amp:
+                    save_dict["scaler_state_dict"] = scaler.state_dict()
+                save_checkpoint(save_dict, os.path.join(cfg.output_dir, f"checkpoint_{step}.pt"))
 
             step += 1
-
-    final_path = os.path.join(cfg.output_dir, "final_model.pt")
-    save_checkpoint(
-        {
-            "step": step,
-            "model_state_dict": model.state_dict(),
+    save_dict = {
+        "step": step,
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "loss": loss.item(),
+        "model_config": {
+            "vocab_size": model_cfg.vocab_size,
+            "n_embd": model_cfg.n_embd,
+            "n_head": model_cfg.n_head,
+            "n_layer": model_cfg.n_layer,
+            "block_size": model_cfg.block_size,
         },
-        final_path,
-    )
+    }
+    if use_amp:
+        save_dict["scaler_state_dict"] = scaler.state_dict()
+    save_checkpoint(save_dict, os.path.join(cfg.output_dir, "final_model.pt"))
 
     total_time = time.time() - total_start_time
     print(f"\nTraining done! Time: {total_time:.1f}s")

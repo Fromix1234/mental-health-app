@@ -25,6 +25,7 @@ data/tokenizer.json
 # PyTorch model files
 *.pt
 *.pth
+*.bin
 
 # Virtual environment
 venv/

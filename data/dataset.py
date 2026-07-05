@@ -206,7 +206,7 @@ def generate_dataset(num_examples=50000):
     return data
 
 
-def train_tokenizer(data, vocab_size=8000):
+def train_tokenizer(data, vocab_size=10000):
     tokenizer = Tokenizer(models.BPE(unk_token="[UNK]"))
     tokenizer.pre_tokenizer = pre_tokenizers.Whitespace()
 
