@@ -11,6 +11,57 @@ GGUF_VERSION = 3
 GGUF_TYPE_UINT32 = 4
 GGUF_TYPE_FLOAT32 = 8
 GGUF_TYPE_STRING = 6
+GGUF_TYPE_ARRAY = 7
+
+
+def write_kv_string(f, key, value):
+    key_bytes = key.encode("utf-8")
+    f.write(struct.pack("<I", len(key_bytes)))
+    f.write(key_bytes)
+    f.write(struct.pack("<I", GGUF_TYPE_STRING))
+    val_bytes = value.encode("utf-8")
+    f.write(struct.pack("<Q", len(val_bytes)))
+    f.write(val_bytes)
+
+
+def write_kv_uint32(f, key, value):
+    key_bytes = key.encode("utf-8")
+    f.write(struct.pack("<I", len(key_bytes)))
+    f.write(key_bytes)
+    f.write(struct.pack("<I", GGUF_TYPE_UINT32))
+    f.write(struct.pack("<I", value))
+
+
+def write_kv_float32(f, key, value):
+    key_bytes = key.encode("utf-8")
+    f.write(struct.pack("<I", len(key_bytes)))
+    f.write(key_bytes)
+    f.write(struct.pack("<I", GGUF_TYPE_FLOAT32))
+    f.write(struct.pack("<f", value))
+
+
+def write_kv_string_array(f, key, items):
+    key_bytes = key.encode("utf-8")
+    f.write(struct.pack("<I", len(key_bytes)))
+    f.write(key_bytes)
+    f.write(struct.pack("<I", GGUF_TYPE_ARRAY))
+    f.write(struct.pack("<I", GGUF_TYPE_STRING))
+    f.write(struct.pack("<Q", len(items)))
+    for item in items:
+        val_bytes = item.encode("utf-8")
+        f.write(struct.pack("<Q", len(val_bytes)))
+        f.write(val_bytes)
+
+
+def write_kv_float32_array(f, key, items):
+    key_bytes = key.encode("utf-8")
+    f.write(struct.pack("<I", len(key_bytes)))
+    f.write(key_bytes)
+    f.write(struct.pack("<I", GGUF_TYPE_ARRAY))
+    f.write(struct.pack("<I", GGUF_TYPE_FLOAT32))
+    f.write(struct.pack("<Q", len(items)))
+    for item in items:
+        f.write(struct.pack("<f", item))
 
 
 def write_gguf_tensor(f, name, tensor):
@@ -26,7 +77,22 @@ def write_gguf_tensor(f, name, tensor):
     f.write(data.tobytes())
 
 
-def convert_to_gguf(ckpt_path, output_path):
+def _load_tokenizer_vocab(tokenizer_path="data/tokenizer.json"):
+    try:
+        from tokenizers import Tokenizer
+        t = Tokenizer.from_file(tokenizer_path)
+        vocab = t.get_vocab()
+        sorted_tokens = [""] * len(vocab)
+        for token, tid in vocab.items():
+            if tid < len(sorted_tokens):
+                sorted_tokens[tid] = token
+        return sorted_tokens
+    except Exception as e:
+        print(f"  Предупреждение: не удалось загрузить токенизатор ({e})")
+        return None
+
+
+def convert_to_gguf(ckpt_path, output_path, tokenizer_path="data/tokenizer.json"):
     print(f"Загружаю чекпоинт: {ckpt_path}")
     import torch
     ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=True)
@@ -39,8 +105,12 @@ def convert_to_gguf(ckpt_path, output_path):
     block_size = mcfg.get("block_size", 256)
 
     n_ff = int(8 * n_embd / 3)
+    head_dim = n_embd // n_head
+    rope_dim = head_dim * 2
 
-    print(f"  n_embd={n_embd}, n_head={n_head}, n_layer={n_layer}, n_ff={n_ff}")
+    print(f"  n_embd={n_embd}, n_head={n_head}, n_layer={n_layer}, n_ff={n_ff}, rope_dim={rope_dim}")
+
+    tokens = _load_tokenizer_vocab(tokenizer_path)
 
     with open(output_path, "wb") as f:
         f.write(struct.pack("<I", GGUF_MAGIC))
@@ -51,32 +121,34 @@ def convert_to_gguf(ckpt_path, output_path):
         )
         f.write(struct.pack("<Q", tensor_count))
 
-        kv_data = [
-            ("general.architecture", GGUF_TYPE_STRING, "llama"),
-            ("general.name", GGUF_TYPE_STRING, "Mental Health AI"),
-            ("llama.context_length", GGUF_TYPE_UINT32, block_size),
-            ("llama.embedding_length", GGUF_TYPE_UINT32, n_embd),
-            ("llama.block_count", GGUF_TYPE_UINT32, n_layer),
-            ("llama.head_count", GGUF_TYPE_UINT32, n_head),
-            ("llama.feed_forward_length", GGUF_TYPE_UINT32, n_ff),
-            ("llama.attention.layer_norm_rms_epsilon", GGUF_TYPE_FLOAT32, 1e-6),
-            ("general.file_type", GGUF_TYPE_UINT32, 0),
-        ]
+        kv = 7
+        if tokens:
+            kv += 7
 
-        f.write(struct.pack("<Q", len(kv_data)))
-        for key, ktype, value in kv_data:
-            key_bytes = key.encode("utf-8")
-            f.write(struct.pack("<I", len(key_bytes)))
-            f.write(key_bytes)
-            f.write(struct.pack("<I", ktype))
-            if ktype == GGUF_TYPE_UINT32:
-                f.write(struct.pack("<I", value))
-            elif ktype == GGUF_TYPE_FLOAT32:
-                f.write(struct.pack("<f", value))
-            elif ktype == GGUF_TYPE_STRING:
-                val_bytes = value.encode("utf-8")
-                f.write(struct.pack("<Q", len(val_bytes)))
-                f.write(val_bytes)
+        f.write(struct.pack("<Q", kv))
+
+        write_kv_string(f, "general.architecture", "llama")
+        write_kv_string(f, "general.name", "Mental Health AI")
+        write_kv_uint32(f, "llama.context_length", block_size)
+        write_kv_uint32(f, "llama.embedding_length", n_embd)
+        write_kv_uint32(f, "llama.block_count", n_layer)
+        write_kv_uint32(f, "llama.head_count", n_head)
+        write_kv_uint32(f, "llama.head_count_kv", n_head)
+        write_kv_uint32(f, "llama.feed_forward_length", n_ff)
+        write_kv_float32(f, "llama.attention.layer_norm_rms_epsilon", 1e-6)
+        write_kv_uint32(f, "llama.rope.dimension_count", rope_dim)
+        write_kv_float32(f, "llama.rope.freq_base", 10000.0)
+        write_kv_uint32(f, "general.file_type", 0)
+
+        if tokens:
+            write_kv_string(f, "tokenizer.ggml.model", "llama")
+            write_kv_string_array(f, "tokenizer.ggml.tokens", tokens)
+            scores = [0.0] * len(tokens)
+            write_kv_float32_array(f, "tokenizer.ggml.scores", scores)
+            write_kv_uint32(f, "tokenizer.ggml.bos_token_id", 2)
+            write_kv_uint32(f, "tokenizer.ggml.eos_token_id", 3)
+            write_kv_uint32(f, "tokenizer.ggml.padding_token_id", 0)
+            write_kv_uint32(f, "tokenizer.ggml.add_bos_token", 1)
 
         print("  Пишу тензоры...")
 
@@ -140,7 +212,10 @@ def main():
         sys.exit(1)
 
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
-    convert_to_gguf(args.checkpoint, args.output)
+    tkn_path = "data/tokenizer.json"
+    if not os.path.exists(tkn_path):
+        tkn_path = None
+    convert_to_gguf(args.checkpoint, args.output, tokenizer_path=tkn_path)
 
 
 if __name__ == "__main__":
