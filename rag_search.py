@@ -3,6 +3,16 @@ import json
 import os
 import re
 import math
+import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+
+def _data_path(rel_path):
+    if getattr(sys, 'frozen', False):
+        base = sys._MEIPASS
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, rel_path)
 
 
 _dataset = None
@@ -12,7 +22,7 @@ _therapist_responses = []
 
 
 def extract_pairs():
-    data_file = "data/therapy_data.json"
+    data_file = _data_path("data/therapy_data.json")
     if not os.path.exists(data_file):
         return []
     with open(data_file, "r", encoding="utf-8") as f:

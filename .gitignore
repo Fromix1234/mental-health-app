@@ -31,6 +31,9 @@ data/tokenizer.json
 venv/
 .venv/
 
+# Build artifacts
+*.spec
+
 # OS
 Thumbs.db
 .DS_Store
