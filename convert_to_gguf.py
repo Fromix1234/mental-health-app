@@ -2,55 +2,31 @@
 """Конвертация TinyGPT в GGUF формат для llama.cpp"""
 import os
 import sys
-import json
 import struct
+
 import numpy as np
 
 GGUF_MAGIC = 0x46554747
 GGUF_VERSION = 3
-
-GGUF_KEY_TOKENIZER_MODEL = 401
-GGUF_KEY_CONTEXT_LENGTH = 404
-GGUF_KEY_EMBEDDING_LENGTH = 405
-GGUF_KEY_BLOCK_COUNT = 406
-GGUF_KEY_HEAD_COUNT = 407
-GGUF_KEY_LAYER_NORM_RMS_EPS = 408
-GGUF_KEY_FEED_FORWARD_LENGTH = 409
-GGUF_KEY_ATTENTION_LAYERNORM_RMS_EPS = 415
-GGUF_KEY_ROPE_FREQ_BASE = 416
-GGUF_KEY_ROPE_SCALE_LINEAR = 417
-
 GGUF_TYPE_UINT32 = 4
 GGUF_TYPE_FLOAT32 = 8
-GGUF_TYPE_BOOL = 9
 GGUF_TYPE_STRING = 6
-GGUF_TYPE_ARRAY = 7
-GGUF_TYPE_FLOAT64 = 10
-
-TENSOR_NAMES = {
-    "token_embedding.weight": "token_embd.weight",
-    "ln_f.weight": "output_norm.weight",
-    "lm_head.weight": "output.weight",
-}
-
-
-def gguf_quantize_f32(data):
-    return data.astype(np.float32)
 
 
 def write_gguf_tensor(f, name, tensor):
+    data = tensor.astype(np.float32)
     name_bytes = name.encode("utf-8") + b"\x00"
     f.write(struct.pack("<I", len(name_bytes)))
     f.write(name_bytes)
-    shape = tensor.shape
+    shape = data.shape
     f.write(struct.pack("<I", len(shape)))
     for dim in reversed(shape):
         f.write(struct.pack("<Q", dim))
     f.write(struct.pack("<I", 0))
-    f.write(tensor.tobytes())
+    f.write(data.tobytes())
 
 
-def convert_to_gguf(ckpt_path, output_path, vocab_size=10000):
+def convert_to_gguf(ckpt_path, output_path):
     print(f"Загружаю чекпоинт: {ckpt_path}")
     import torch
     ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=True)
@@ -62,7 +38,6 @@ def convert_to_gguf(ckpt_path, output_path, vocab_size=10000):
     n_layer = mcfg.get("n_layer", 8)
     block_size = mcfg.get("block_size", 256)
 
-    head_dim = n_embd // n_head
     n_ff = int(8 * n_embd / 3)
 
     print(f"  n_embd={n_embd}, n_head={n_head}, n_layer={n_layer}, n_ff={n_ff}")
@@ -72,17 +47,24 @@ def convert_to_gguf(ckpt_path, output_path, vocab_size=10000):
         f.write(struct.pack("<I", GGUF_VERSION))
 
         tensor_count = (
-            1 +  # token_embd
-            1 +  # output_norm
-            1 +  # output
-            n_layer * 7  # per layer: attn_norm, q, k, v, attn_output, ffn_norm, ffn_gate, ffn_up, ffn_down
+            1 + 1 + 1 + n_layer * 9
         )
         f.write(struct.pack("<Q", tensor_count))
 
-        kv_count = 10
-        f.write(struct.pack("<Q", kv_count))
+        kv_data = [
+            ("general.architecture", GGUF_TYPE_STRING, "llama"),
+            ("general.name", GGUF_TYPE_STRING, "Mental Health AI"),
+            ("llama.context_length", GGUF_TYPE_UINT32, block_size),
+            ("llama.embedding_length", GGUF_TYPE_UINT32, n_embd),
+            ("llama.block_count", GGUF_TYPE_UINT32, n_layer),
+            ("llama.head_count", GGUF_TYPE_UINT32, n_head),
+            ("llama.feed_forward_length", GGUF_TYPE_UINT32, n_ff),
+            ("llama.attention.layer_norm_rms_epsilon", GGUF_TYPE_FLOAT32, 1e-6),
+            ("general.file_type", GGUF_TYPE_UINT32, 0),
+        ]
 
-        def write_kv(key, ktype, value):
+        f.write(struct.pack("<Q", len(kv_data)))
+        for key, ktype, value in kv_data:
             key_bytes = key.encode("utf-8")
             f.write(struct.pack("<I", len(key_bytes)))
             f.write(key_bytes)
@@ -91,32 +73,14 @@ def convert_to_gguf(ckpt_path, output_path, vocab_size=10000):
                 f.write(struct.pack("<I", value))
             elif ktype == GGUF_TYPE_FLOAT32:
                 f.write(struct.pack("<f", value))
-            elif ktype == GGUF_TYPE_BOOL:
-                f.write(struct.pack("<?", value))
-            elif ktype == GGUF_TYPE_FLOAT64:
-                f.write(struct.pack("<d", value))
             elif ktype == GGUF_TYPE_STRING:
                 val_bytes = value.encode("utf-8")
                 f.write(struct.pack("<Q", len(val_bytes)))
                 f.write(val_bytes)
 
-        write_kv("general.architecture", GGUF_TYPE_STRING, "llama")
-        write_kv("general.name", GGUF_TYPE_STRING, "Mental Health AI")
-        write_kv(GGUF_KEY_TOKENIZER_MODEL, GGUF_TYPE_STRING, "no_tokenizer")
-        write_kv(GGUF_KEY_CONTEXT_LENGTH, GGUF_TYPE_UINT32, block_size)
-        write_kv(GGUF_KEY_EMBEDDING_LENGTH, GGUF_TYPE_UINT32, n_embd)
-        write_kv(GGUF_KEY_BLOCK_COUNT, GGUF_TYPE_UINT32, n_layer)
-        write_kv(GGUF_KEY_HEAD_COUNT, GGUF_TYPE_UINT32, n_head)
-        write_kv(GGUF_KEY_FEED_FORWARD_LENGTH, GGUF_TYPE_UINT32, n_ff)
-        write_kv(GGUF_KEY_LAYER_NORM_RMS_EPS, GGUF_TYPE_FLOAT32, 1e-6)
-        write_kv("general.file_type", GGUF_TYPE_UINT32, 0)
-
-        rope_freq = mcfg.get("rope_freq", 10000.0)
-        write_kv(GGUF_KEY_ROPE_FREQ_BASE, GGUF_TYPE_FLOAT32, rope_freq)
-
         print("  Пишу тензоры...")
 
-        te = sd["token_embedding.weight"].numpy().astype(np.float32)
+        te = sd["token_embedding.weight"].numpy()
         write_gguf_tensor(f, "token_embd.weight", te)
 
         for i in range(n_layer):
