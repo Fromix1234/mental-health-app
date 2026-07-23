@@ -1,3 +1,6 @@
 torch>=2.0.0
 tokenizers>=0.15.0
 tqdm
+
+# Для 9B GGUF модели (сервер)
+llama-cpp-python>=0.2.0
